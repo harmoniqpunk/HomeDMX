@@ -1,0 +1,7 @@
+{
+"arduino.defaultBaudRate": 115200,
+"licenser.license": "MIT",
+"licenser.projectName": "HomeDMX",
+"arduino.enableUSBDetection": true,
+"licenser.author": "Harmoniq Punk"
+}

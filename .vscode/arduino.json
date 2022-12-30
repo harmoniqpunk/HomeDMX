@@ -1,0 +1,7 @@
+{
+    "sketch": "HomeDMX.ino",
+    "board": "esp32:esp32:esp32thing_plus",
+    "output": "./build",
+    "configuration": "FlashFreq=40,PartitionScheme=default,UploadSpeed=115200,DebugLevel=none",
+    "port": "/dev/tty.usbserial-110"
+}
