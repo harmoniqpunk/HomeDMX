@@ -14,6 +14,7 @@ The project use VSCode editor, Arduino frameworks and ESP32 toolchain for Arduin
 
 * [HomeSpan](https://github.com/HomeSpan/HomeSpan)
 * [SparkFunDMX](https://github.com/sparkfun/SparkFunDMX)
+* [StateMachine](https://github.com/jrullan/StateMachine)
 
 ### Installing dependecies
 
@@ -44,3 +45,5 @@ This project is licensed under the MIT License - see the LICENSE.md file for det
 
 Inspiration, code snippets, etc.
 * [homespan-examples-bridges](https://github.com/HomeSpan/HomeSpan/blob/master/examples/08-Bridges/08-Bridges.ino)
+* [statemachine-examples](https://github.com/jrullan/StateMachine/blob/master/examples/arduino_state_machine/arduino_state_machine.ino)
+
