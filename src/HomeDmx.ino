@@ -33,6 +33,7 @@
 #include "config.h"
 #include <Preferences.h>
 #include <SparkFunDMX.h>
+#include <nvs_flash.h>
 
 // Global variables
 Preferences preferences;
@@ -213,18 +214,54 @@ struct DMX_RGB_Light : Service::LightBulb {
 // 2. Environment variables (from platformio.ini)
 // 3. Default fallback values from config.h
 void loadWiFiCredentials() {
-  preferences.begin(PREFERENCES_NAMESPACE, true); // Read-only mode
+  // Initialize NVS if not already initialized
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    // NVS partition was truncated and needs to be erased
+    Serial.println("Erasing NVS flash...");
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    // Retry initialization
+    err = nvs_flash_init();
+  }
+  
+  if (err != ESP_OK) {
+    Serial.printf("Error initializing NVS: %d\n", err);
+    // Fall back to environment variables
+    wifiSSID = HOMEDMX_WIFI_SSID;
+    wifiPassword = HOMEDMX_WIFI_PASS;
+    Serial.println("Using WiFi credentials from environment/defaults (NVS error)");
+    return;
+  }
+  
+  // Try to open preferences
+  if (!preferences.begin(PREFERENCES_NAMESPACE, true)) {
+    Serial.println("Failed to open preferences namespace");
+    // Fall back to environment variables
+    wifiSSID = HOMEDMX_WIFI_SSID;
+    wifiPassword = HOMEDMX_WIFI_PASS;
+    Serial.println("Using WiFi credentials from environment/defaults (preferences error)");
+    return;
+  }
   
   // Check if credentials exist in preferences
   if (preferences.isKey(PREF_WIFI_SSID) && preferences.isKey(PREF_WIFI_PASS)) {
     wifiSSID = preferences.getString(PREF_WIFI_SSID, "");
     wifiPassword = preferences.getString(PREF_WIFI_PASS, "");
-    Serial.println("WiFi credentials loaded from preferences");
+    
+    // Validate that we got non-empty strings
+    if (wifiSSID.length() > 0 && wifiPassword.length() > 0) {
+      Serial.println("WiFi credentials loaded from preferences");
+    } else {
+      // Fall back to environment variables
+      wifiSSID = HOMEDMX_WIFI_SSID;
+      wifiPassword = HOMEDMX_WIFI_PASS;
+      Serial.println("Using WiFi credentials from environment/defaults (empty stored values)");
+    }
   } else {
     // Use the credentials defined in platformio.ini or the fallback defaults from config.h
     wifiSSID = HOMEDMX_WIFI_SSID;
     wifiPassword = HOMEDMX_WIFI_PASS;
-    Serial.println("Using WiFi credentials from environment/defaults");
+    Serial.println("Using WiFi credentials from environment/defaults (no stored values)");
   }
   
   preferences.end();
@@ -232,14 +269,36 @@ void loadWiFiCredentials() {
 
 // Function to save WiFi credentials to preferences after successful connection
 void saveWiFiCredentials() {
-  // Only save if we're not using credentials from preferences already
-  if (!preferences.isKey(PREF_WIFI_SSID) || !preferences.isKey(PREF_WIFI_PASS)) {
-    preferences.begin(PREFERENCES_NAMESPACE, false); // Read-write mode
+  // Initialize NVS if not already initialized
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    // NVS partition was truncated and needs to be erased
+    Serial.println("Erasing NVS flash...");
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    // Retry initialization
+    err = nvs_flash_init();
+  }
+  ESP_ERROR_CHECK(err);
+  
+  // Begin preferences in read-write mode
+  preferences.begin(PREFERENCES_NAMESPACE, false);
+  
+  // Check if we already have these credentials stored
+  bool hasStoredSSID = preferences.isKey(PREF_WIFI_SSID);
+  bool hasStoredPass = preferences.isKey(PREF_WIFI_PASS);
+  String storedSSID = preferences.getString(PREF_WIFI_SSID, "");
+  String storedPass = preferences.getString(PREF_WIFI_PASS, "");
+  
+  // Only save if credentials are different from what's stored
+  if (!hasStoredSSID || !hasStoredPass || storedSSID != wifiSSID || storedPass != wifiPassword) {
     preferences.putString(PREF_WIFI_SSID, wifiSSID);
     preferences.putString(PREF_WIFI_PASS, wifiPassword);
-    preferences.end();
     Serial.println("WiFi credentials saved to preferences");
+  } else {
+    Serial.println("WiFi credentials already stored in preferences");
   }
+  
+  preferences.end();
 }
 
 void setup() {
@@ -272,7 +331,7 @@ void setup() {
   // Configure HomeSpan
   homeSpan.setStatusPin(STATUS_LED_PIN);
   homeSpan.setControlPin(CONTROL_BUTTON_PIN);
-  homeSpan.setPairingCode(SETUP_CODE);
+  homeSpan.setPairingCode(HOMEDMX_SETUP_CODE);
   homeSpan.setWifiCredentials(wifiSSID.c_str(), wifiPassword.c_str());
   
   // Initialize HomeSpan
@@ -330,6 +389,47 @@ void loop() {
   
   // Update DMX shield - this will send out DMX data
   dmx.update();
+  
+  // Add HomeKit reset functionality
+  static unsigned long buttonPressStartTime = 0;
+  static bool buttonWasPressed = false;
+  
+  // Check if button is pressed (LOW when pressed, as it uses INPUT_PULLUP)
+  if (digitalRead(CONTROL_BUTTON_PIN) == LOW) {
+    // Button is currently pressed
+    if (!buttonWasPressed) {
+      // This is the start of a new press
+      buttonPressStartTime = millis();
+      buttonWasPressed = true;
+      Serial.println("Control button pressed - hold for 10 seconds to reset HomeKit pairing");
+    } else {
+      // Continuing to hold the button
+      if (millis() - buttonPressStartTime > 10000) { // 10 seconds
+        // Perform factory reset
+        Serial.println("\n*** PERFORMING FACTORY RESET ***");
+        Serial.println("Removing all HomeKit pairings and resetting configuration...");
+        
+        // Reset HomeKit data using nvs_flash_erase() to erase all data
+        nvs_flash_erase();
+        nvs_flash_init();
+        
+        // Flash LED to indicate reset is complete
+        for (int i = 0; i < 10; i++) {
+          digitalWrite(STATUS_LED_PIN, HIGH);
+          delay(100);
+          digitalWrite(STATUS_LED_PIN, LOW);
+          delay(100);
+        }
+        
+        Serial.println("Factory reset complete. Restarting device...");
+        delay(1000);
+        ESP.restart();  // Restart the ESP32
+      }
+    }
+  } else {
+    // Button is released
+    buttonWasPressed = false;
+  }
   
   // Add a small delay to prevent 100% CPU usage
   delay(10);
